@@ -12,60 +12,29 @@ df['trading_day'] = pd.to_datetime(df['trading_day'])
 # Filtriamo solo i dati del 2024
 #df = df[df['trading_day'].dt.year > 2016]
 
-def calculate_drawdown_statistics(equity):
-    # Calcolo del drawdown
-    running_max = equity.expanding().max()
-    drawdown = (equity - running_max) / running_max * 100
-    
-    # Statistiche base
-    avg_drawdown = drawdown[drawdown < 0].mean() if len(drawdown[drawdown < 0]) > 0 else 0
-    
-    # Periodi di drawdown
-    in_drawdown = False
-    drawdown_periods = []
-    current_drawdown_start = None
-    
-    for i in range(len(drawdown)):
-        if drawdown.iloc[i] < 0 and not in_drawdown:
-            in_drawdown = True
-            current_drawdown_start = i
-        elif drawdown.iloc[i] >= 0 and in_drawdown:
-            in_drawdown = False
-            drawdown_periods.append((current_drawdown_start, i))
-    
-    if in_drawdown:
-        drawdown_periods.append((current_drawdown_start, len(drawdown) - 1))
-    
-    # Calcolo durate
-    drawdown_durations = [end - start for start, end in drawdown_periods]
-    max_drawdown_duration = max(drawdown_durations) if drawdown_durations else 0
-    avg_drawdown_duration = np.mean(drawdown_durations) if drawdown_durations else 0
-    
-    # Tempo in drawdown
-    total_drawdown_days = sum(drawdown_durations)
-    total_days = len(equity)
-    time_in_drawdown_pct = (total_drawdown_days / total_days) * 100 if total_days > 0 else 0
-    
-    return {
-        'avg_drawdown': avg_drawdown,
-        'max_drawdown_duration': max_drawdown_duration,
-        'avg_drawdown_duration': avg_drawdown_duration,
-        'num_drawdown_periods': len(drawdown_periods),
-        'time_in_drawdown_pct': time_in_drawdown_pct
-    }
-
-def calculate_position_size(entry_price, stop_loss, account_size):
+def calculate_position_size(entry_price, stop_loss, account_size, leverage=4):
     # Calcolo del rischio in dollari
     R = abs(entry_price - stop_loss)
     
-    # Calcolo delle due limitazioni
-    position_size = int(account_size * 0.01 / R)  # Rischio massimo del 1% del capitale per trade
-    #leverage_based_size = int((4 * account_size) / entry_price)  # Limitazione basata sulla leva 4x
+    # Calcolo size basato sul rischio (1% del capitale)
+    risk_based_size = int(account_size * 0.01 / R)
     
-    # Prendiamo il minore dei due valori
-    #position_size = min(position_size, leverage_based_size)
+    # Calcolo size massimo con leva piena
+    max_shares_with_leverage = int((account_size * leverage) / entry_price)
     
-    return position_size if position_size > 0 else 0
+    # Usa il risk_based_size direttamente
+    position_size = risk_based_size
+    
+    # Debug info
+    position_value = position_size * entry_price
+    actual_leverage = position_value / account_size
+    
+    # Se superiamo la leva massima, allora limitiamo
+    if actual_leverage > leverage:
+        position_size = max_shares_with_leverage
+    
+    #return position_size if position_size > 0 else 0
+    return risk_based_size
 
 def ibkr_commission(shares):
 
@@ -123,18 +92,6 @@ def calculate_ATR(df, period=14):
     atr = daily_data['TR'].mean()
     
     return atr
-
-def calculate_relative_volume(first_candle, df):
-    # Filtra i 14 giorni precedenti
-    previous_days = df[df['trading_day'] < first_candle['trading_day']]
-    previous_first_candles = previous_days.groupby('trading_day').head(1).tail(14)
-
-    avg_5m_volume_14gg = previous_first_candles['volume'].mean()
-
-    if avg_5m_volume_14gg == 0 or np.isnan(avg_5m_volume_14gg):
-        return 0
-
-    return first_candle['volume'] / avg_5m_volume_14gg
 
 def execute_trade(day_data, signal_type, first_candle, entry_price, stop_loss, position_size):
     # Trova le candele dopo il segnale
@@ -244,12 +201,6 @@ def analyze_trading_day(day_data, current_equity):
     if not dr:
         return None
     
-    # Calcola relative volume
-    rel_vol = calculate_relative_volume(first_candle, df)
-
-    if rel_vol < 1.0:
-        return None
-    
     # Trova le candele dopo il DR
     candles_after_dr = day_data.iloc[1:]
     
@@ -276,7 +227,7 @@ def analyze_trading_day(day_data, current_equity):
     if trade_result is not None:
         trade_result['date'] = day_data.iloc[0]['timestamp']
         trade_result['ATR'] = atr_value
-        trade_result['relative_volume'] = rel_vol
+        #trade_result['relative_volume'] = rel_vol
         return pd.Series(trade_result)
 
 # Capitale iniziale
