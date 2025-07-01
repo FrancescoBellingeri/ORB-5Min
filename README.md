@@ -17,18 +17,13 @@ Il backtest include gestione del rischio, volumi relativi e uscita a fine giorna
    - Definita dalla prima candela 5 minuti della giornata (9:30 - 9:35 ET)
    - Si prende l’high e il low di questa candela
 
-2. **Filtri di Volume:**
-
-   - Calcolo del Relative Volume: volume della candela OR / media dei volumi delle prime candele dei 14 giorni precedenti
-   - Si entra solo se il relative volume ≥ 100%
-
-3. **Filtro Direzione:**
+2. **Filtro Direzione:**
 
    - Solo long se candela OR è bullish (close > open)
    - Solo short se candela OR è bearish (close < open)
    - Nessun trade su doji (close = open)
 
-4. **Esecuzione Ordine:**
+3. **Esecuzione Ordine:**
    - **Long:** ordine stop sopra l’high della OR
    - **Short:** ordine stop sotto il low della OR
 
