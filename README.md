@@ -124,13 +124,8 @@ ALPACA_BASE_URL=https://paper-api.alpaca.markets/v2
 ## 👨‍💻 Autore
 
 Francesco Bellingeri
-GitHub – Feel free to open issues or pull requests.
 
 ## 🛑 Disclaimer
 
 Questo progetto è a scopo puramente educativo.
 Non rappresenta un consiglio finanziario né una strategia da usare su mercati reali senza verifica.
-
-```
-
-```
