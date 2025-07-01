@@ -1,64 +1,115 @@
-# QQQ Opening Range Breakout Strategy Backtester
+# QQQ 5-Minute Opening Range Breakout (ORB) Strategy Backtester
 
-## Overview
+## 📈 Descrizione
 
-This project implements and backtests a simple Opening Range Breakout (ORB) strategy on QQQ using 5-minute intraday data. The strategy combines price action with relative volume analysis to identify potential trading opportunities at market open.
+Questo progetto implementa e backtesta una strategia Opening Range Breakout (ORB) su QQQ utilizzando dati intraday a 5 minuti.  
+La strategia entra tramite ordini stop (buy o sell) in direzione della prima candela della giornata e applica uno stop loss dinamico basato sulla volatilità (ATR).  
+Il backtest include gestione del rischio, volumi relativi e uscita a fine giornata.
 
-## Strategy Rules
+---
 
-### Entry Conditions
+## 🧠 Strategia
 
-1. **Opening Range (OR)**
+### Entry
 
-   - Uses the first 5-minute candle (9:30-9:35 ET)
-   - Determines high and low of this range
+1. **Opening Range (OR):**
 
-2. **Volume Filter**
+   - Definita dalla prima candela 5 minuti della giornata (9:30 - 9:35 ET)
+   - Si prende l’high e il low di questa candela
 
-   - Calculates Relative Volume of the first 5-minute candle
-   - Compares to 14-day average of first 5-minute volume
-   - Only trades if Relative Volume ≥ 100%
+2. **Filtri di Volume:**
 
-3. **Direction Filter**
+   - Calcolo del Relative Volume: volume della candela OR / media dei volumi delle prime candele dei 14 giorni precedenti
+   - Si entra solo se il relative volume ≥ 100%
 
-   - Long only on bullish OR candle (close > open)
-   - Short only on bearish OR candle (close < open)
-   - No trades on doji candles (close = open)
+3. **Filtro Direzione:**
 
-4. **Entry Execution**
-   - Long: Stop order above OR high
-   - Short: Stop order below OR low
+   - Solo long se candela OR è bullish (close > open)
+   - Solo short se candela OR è bearish (close < open)
+   - Nessun trade su doji (close = open)
 
-### Risk Management
+4. **Esecuzione Ordine:**
+   - **Long:** ordine stop sopra l’high della OR
+   - **Short:** ordine stop sotto il low della OR
 
-- Stop Loss: 10% of 14-day ATR from entry price
-- Position Size: Risks 1% of account per trade
-- Exit: Either stop loss hit or market close (16:00 ET)
+### Gestione del Rischio
 
-## Implementation Details
+- **Stop Loss:** 10% del valore dell’ATR a 14 giorni, calcolato in punti dal prezzo di ingresso
+- **Chiusura:** a fine giornata (16:00 ET) se SL/TP non sono stati raggiunti
+- **Position Size:** calcolata per rischiare il 1% del capitale
 
-### Key Components
+---
 
-- Daily ATR calculation
-- Relative Volume computation
-- Position sizing based on account risk
-- IBKR commission simulation
+## 🗂️ Struttura della repo
 
-### Data Requirements
+- `fetch_data.py`: script per scaricare i dati 5-min OHLCV da Alpaca API
+- `clear_dataset.py`: script per pulire e preparare il dataset scaricato
+- `backtest.py`: esegue il backtest della strategia
+- `analyze_backtest.py`: genera statistiche e grafici dai risultati del backtest
+- `data/`: cartella dove vengono salvati i file CSV dei dati
+- `backtesting/`: cartella dove vengono salvati i risultati e report del backtest
 
-- 5-minute OHLCV data for QQQ
-- Minimum 14 days of historical data for indicators
+---
 
-## Results
+## Requisiti
 
-The backtest results compare the strategy's performance against a buy & hold approach on QQQ, showing:
+- Python 3.8+
+- Librerie: `pandas`, `numpy`, `matplotlib`, `seaborn`, `python-dotenv` (per leggere .env)
 
-- Equity curve comparison
-- Key performance metrics
-- Risk-adjusted returns
+Puoi installare le dipendenze con:
 
-Dependencies - pandas - numpy - matplotlib - seaborn
-Future Improvements - Add multiple time frame analysis - Implement adaptive position sizing - Add more sophisticated exit strategies - Include market regime filters
+````bash
+pip install -r requirements.txt
 
-Author
+---
+
+## Configurazione API
+
+Crea un file `.env` nella root del progetto con le tue credenziali Alpaca:
+
+```ini
+API_KEY=
+API_SECRET=
+ALPACA_BASE_URL=https://paper-api.alpaca.markets/v2
+
+---
+
+## 🚀 Come usare la repo
+
+1. **Scaricare i Dati**
+   - Lancia nel terminale: python data/fetch_data.py
+   - Scarica i dati a 5 minuti per QQQ da Alpaca.
+   - Salva il file CSV in data/qqq_5Min.csv.
+
+2. **Pulire i Dati**
+   - Lancia nel terminale: python data/clear_dataset.py
+   - Pulisce il dataset rimuovendo anomalie e righe mancanti.
+   - Crea un file pronto per il backtest.
+
+3. **Eseguire il Backtest**
+   - Lancia nel terminale: python backtesting/backtest.py
+   - Applica la strategia ORB su QQQ.
+   - I trade vengono salvati in outputs/trading_results_5Min.csv.
+
+4. **Analizzare i risultati**
+   - Genera:
+      - Grafico Equity curve
+      - Statistiche di performance salvate in outputs/stats_strategy_5Min.csv
+
+🔧 Miglioramenti Futuri
+Supporto multi-timeframe (es. 15min OR con conferma H1)
+
+Posizionamento adattivo con trailing stop
+
+Aggiunta di TP dinamici basati su range giornaliero
+
+Filtro regime di mercato (es. trend SPY, VIX, ecc.)
+
+👨‍💻 Autore
 Francesco Bellingeri
+GitHub – Feel free to open issues or pull requests.
+
+🛑 Disclaimer
+Questo progetto è a scopo puramente educativo.
+Non rappresenta un consiglio finanziario né una strategia da usare su mercati reali senza verifica.
+````

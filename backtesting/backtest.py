@@ -4,13 +4,13 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 # Carichiamo il dataset pulito
-df = pd.read_csv('./data/qqq_data.csv')
+df = pd.read_csv('./data/qqq_5Min.csv')
 
 # Convertiamo la colonna trading_day in datetime
 df['trading_day'] = pd.to_datetime(df['trading_day'])
 
 # Filtriamo solo i dati del 2024
-#df = df[df['trading_day'].dt.year > 2024]
+#df = df[df['trading_day'].dt.year > 2016]
 
 def calculate_position_size(entry_price, stop_loss, account_size, leverage=4):
     # Calcolo del rischio in dollari
@@ -19,12 +19,21 @@ def calculate_position_size(entry_price, stop_loss, account_size, leverage=4):
     # Calcolo size basato sul rischio (1% del capitale)
     risk_based_size = int(account_size * 0.01 / R)
     
-    # Calcolo size massimo con leva (usando 70% del margine disponibile per sicurezza)
-    max_shares_with_leverage = int((account_size * leverage * 0.7) / entry_price)
+    # Calcolo size massimo con leva piena
+    max_shares_with_leverage = int((account_size * leverage) / entry_price)
     
-    # Prendiamo il minore dei due valori
-    position_size = min(risk_based_size, max_shares_with_leverage)
+    # Usa il risk_based_size direttamente
+    position_size = risk_based_size
     
+    # Debug info
+    position_value = position_size * entry_price
+    actual_leverage = position_value / account_size
+    
+    # Se superiamo la leva massima, allora limitiamo
+    if actual_leverage > leverage:
+        position_size = max_shares_with_leverage
+    
+    #return position_size if position_size > 0 else 0
     return risk_based_size
 
 def ibkr_commission(shares):
@@ -87,6 +96,10 @@ def calculate_ATR(df, period=14):
 def execute_trade(day_data, signal_type, first_candle, entry_price, stop_loss, position_size):
     # Trova le candele dopo il segnale
     candles_after_signal = day_data[day_data['timestamp'] > first_candle['timestamp']]
+
+    # Calcola il rischio (sempre positivo)
+    risk = abs(entry_price - stop_loss)
+    take_profit = entry_price + (risk * 10) if signal_type == 'LONG' else entry_price - (risk * 10)
     
     if len(candles_after_signal) == 0:
         return None
@@ -105,33 +118,39 @@ def execute_trade(day_data, signal_type, first_candle, entry_price, stop_loss, p
                 entry_candle = candle
             continue  # Passiamo alla prossima candela se non siamo entrati
         
-        # Se siamo entrati, controlliamo lo stop loss
-        if signal_type == 'LONG' and candle['low'] <= stop_loss:
-            exit_price = stop_loss
-            exit_reason = 'SL'
-            break
-        elif signal_type == 'SHORT' and candle['high'] >= stop_loss:
-            exit_price = stop_loss
-            exit_reason = 'SL'
-            break
+        # Se siamo entrati, controlliamo stop loss e take profit
+        if signal_type == 'LONG':
+            if candle['low'] <= stop_loss:
+                exit_price = stop_loss
+                exit_reason = 'SL'
+                break
+            elif candle['high'] >= take_profit:
+                exit_price = take_profit
+                exit_reason = 'TP'
+                break
+        else:  # SHORT
+            if candle['high'] >= stop_loss:
+                exit_price = stop_loss
+                exit_reason = 'SL'
+                break
+            elif candle['low'] <= take_profit:
+                exit_price = take_profit
+                exit_reason = 'TP'
+                break
     
     # Se non siamo mai entrati, nessun trade
     if entry_candle is None:
         return None
     
-    # Calcola il rischio (sempre positivo)
-    risk = abs(entry_price - stop_loss)
-
     # Se non abbiamo hittato stop loss, usiamo chiusura fine giornata
     if exit_reason == 'EOD':
         exit_price = candles_after_signal.iloc[-1]['close']
-        reward = abs(exit_price - entry_price)
-        rr_ratio = reward / risk if risk > 0 else 0
-    else:
-        rr_ratio = -1
+
+    reward = abs(exit_price - entry_price)
+    rr_ratio = reward / risk if risk > 0 else 0
 
     total_commission = ibkr_commission(position_size)
-    
+
     # Calcolo PnL
     if signal_type == 'LONG':
         pnl = (exit_price - entry_price) * position_size - total_commission
@@ -183,7 +202,7 @@ def analyze_trading_day(day_data, current_equity):
         return None
     
     # Trova le candele dopo il DR
-    candles_after_dr = day_data.iloc[1:]
+    candles_after_dr = day_data.iloc[2:]
     
     if len(candles_after_dr) == 0:
         return None
@@ -208,6 +227,7 @@ def analyze_trading_day(day_data, current_equity):
     if trade_result is not None:
         trade_result['date'] = day_data.iloc[0]['timestamp']
         trade_result['ATR'] = atr_value
+        #trade_result['relative_volume'] = rel_vol
         return pd.Series(trade_result)
 
 # Capitale iniziale
@@ -227,5 +247,5 @@ for day, day_data in df.groupby('trading_day'):
 # Creiamo un DataFrame con i risultati
 trading_results = pd.DataFrame(results)
 
-trading_results.to_csv('backtesting/trading_results.csv', index=False)
-print(f"\nRisultati salvati in 'trading_results.csv'")
+trading_results.to_csv('outputs/trading_results_5Min.csv', index=False)
+print(f"\nRisultati salvati in 'trading_results_TP.csv'")

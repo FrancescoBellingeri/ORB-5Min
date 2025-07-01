@@ -5,7 +5,7 @@ import pytz
 from datetime import datetime
 
 # Importiamo il dataset
-df = pd.read_csv('data/qqq_historical_data.csv')
+df = pd.read_csv('data/qqq_30Min.csv')
 
 # Convertiamo la colonna timestamp in datetime se non lo è già
 df['timestamp'] = pd.to_datetime(df['timestamp'], utc=True)
@@ -49,4 +49,4 @@ valid_days = df.groupby(df['timestamp'].dt.date)['timestamp'].max().dt.time == p
 valid_days = valid_days[valid_days].index
 df = df[df['timestamp'].dt.date.isin(valid_days)]
 
-df.to_csv('data/qqq_data.csv', index=False)
+df.to_csv('data/qqq_30Min.csv', index=False)

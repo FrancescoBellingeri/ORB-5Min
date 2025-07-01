@@ -3,12 +3,37 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-df = pd.read_csv('./data/qqq_data.csv')
+# Calcolo dei giorni consecutivi vincenti/perdenti
+def get_streak_stats(pnl_series):
+    # Creiamo una serie di 1 (vincenti) e -1 (perdenti)
+    streaks = (pnl_series > 0).astype(int)
+    
+    # Identifichiamo i cambi di streak
+    changes = streaks.diff().fillna(0) != 0
+    
+    # Assegniamo un ID a ogni streak
+    streak_id = changes.cumsum()
+    
+    # Raggruppiamo per streak e contiamo
+    streak_lengths = streaks.groupby(streak_id).size()
+    
+    # Separiamo streak vincenti e perdenti
+    winning_streaks = streak_lengths[streaks.groupby(streak_id).first() == 1]
+    losing_streaks = streak_lengths[streaks.groupby(streak_id).first() == 0]
+    
+    return {
+        'max_winning_streak': winning_streaks.max() if len(winning_streaks) > 0 else 0,
+        'avg_winning_streak': winning_streaks.mean() if len(winning_streaks) > 0 else 0,
+        'max_losing_streak': losing_streaks.max() if len(losing_streaks) > 0 else 0,
+        'avg_losing_streak': losing_streaks.mean() if len(losing_streaks) > 0 else 0
+    }
+
+df = pd.read_csv('./data/qqq_5Min.csv')
 
 # Convertiamo la colonna trading_day in datetime
 df['trading_day'] = pd.to_datetime(df['trading_day'])
 
-trading_results = pd.read_csv('backtesting/trading_results.csv')
+trading_results = pd.read_csv('outputs/trading_results_5Min.csv')
 
 STARTING_CAPITAL = 50000
 
@@ -52,7 +77,7 @@ if len(trading_results) > 0:
     plt.grid(True, linestyle='--', alpha=0.7)
     plt.tight_layout()
     
-    plt.savefig('backtesting/equity__ORB_5min.png', dpi=300, bbox_inches='tight')
+    plt.savefig('outputs/equity__ORB__5Min.png', dpi=300, bbox_inches='tight')
     plt.close()
     
     # Stampiamo le statistiche
@@ -127,6 +152,14 @@ if len(trading_results) > 0:
     excess_return = strategy_return - buy_hold_return
     print(f"\nExcess Return vs Buy & Hold: {excess_return:.2f}%")
 
+    streak_stats = get_streak_stats(trading_results['pnl'])
+
+    print("\n--- Statistiche Streak ---")
+    print(f"Massimo numero di trade vincenti consecutivi: {streak_stats['max_winning_streak']}")
+    print(f"Media trade vincenti consecutivi: {streak_stats['avg_winning_streak']:.2f}")
+    print(f"Massimo numero di trade perdenti consecutivi: {streak_stats['max_losing_streak']}")
+    print(f"Media trade perdenti consecutivi: {streak_stats['avg_losing_streak']:.2f}")
+
     stats = {
         'Capitale Iniziale': [f"${STARTING_CAPITAL:,.2f}"],
         'Capitale Finale': [f"${trading_results['equity'].iloc[-1]:,.2f}"],
@@ -152,13 +185,20 @@ if len(trading_results) > 0:
         'Sharpe Ratio': [f"{sharpe_ratio:.2f}" if len(trading_results) > 1 else "N/A"],
         'Buy & Hold Return (%)': [f"{buy_hold_return:.2f}"],
         'Capitale finale Buy & Hold': [f"${buy_hold_df['equity'].iloc[-1]:.2f}"],
-        'Excess Return vs Buy & Hold (%)': [f"{excess_return:.2f}"]
+        'Excess Return vs Buy & Hold (%)': [f"{excess_return:.2f}"],
+        'Max Trade Vincenti Consecutivi': [f"{streak_stats['max_winning_streak']}"],
+        'Media Trade Vincenti Consecutivi': [f"{streak_stats['avg_winning_streak']:.2f}"],
+        'Max Trade Perdenti Consecutivi': [f"{streak_stats['max_losing_streak']}"],
+        'Media Trade Perdenti Consecutivi': [f"{streak_stats['avg_losing_streak']:.2f}"]
     }
 
     # Crea la tabella
     df_stats = pd.DataFrame(stats)
 
-    df_stats.to_csv('backtesting/stats_strategy.csv', index=False)
+    # Crea la tabella
+    df_stats = pd.DataFrame(stats)
+
+    df_stats.to_csv('outputs/stats_strategy_5Min.csv', index=False)
     
 else:
     print("Nessun trade eseguito con la strategia ORB + RelVol")

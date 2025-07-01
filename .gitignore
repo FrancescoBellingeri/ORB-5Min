@@ -1,3 +1,11 @@
 # Ignora file di configurazione ambiente
 .env
 .env.*  
+
+roadmap.txt
+
+# Ignora tutti i CSV dentro la cartella outputs
+outputs/*.csv
+
+# Ignora tutti i CSV dentro la cartella data
+data/*.csv

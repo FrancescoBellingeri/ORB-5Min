@@ -42,8 +42,8 @@ try:
     print(f"Numero totale di candele: {len(df)}")
     
     # Opzionale: salva i dati in un file CSV
-    df.to_csv('data/qqq_historical_data.csv', index=False)
-    print("\nDati salvati in 'qqq_historical_data.csv'")
+    df.to_csv('data/qqq_5Min.csv', index=False)
+    print("\nDati salvati in 'qqq_5Min.csv'")
 
 except Exception as e:
     print(f"Errore: {e}")
