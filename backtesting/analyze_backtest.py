@@ -28,12 +28,12 @@ def get_streak_stats(pnl_series):
         'avg_losing_streak': losing_streaks.mean() if len(losing_streaks) > 0 else 0
     }
 
-df = pd.read_csv('./data/qqq_5Min.csv')
+df = pd.read_csv('./data/qqq_30Min.csv')
 
 # Convertiamo la colonna trading_day in datetime
 df['trading_day'] = pd.to_datetime(df['trading_day'])
 
-trading_results = pd.read_csv('outputs/trading_results_5Min.csv')
+trading_results = pd.read_csv('outputs/trading_results_5Min_IVB.csv')
 
 STARTING_CAPITAL = 50000
 
@@ -60,14 +60,14 @@ if len(trading_results) > 0:
     sns.set_style("whitegrid")
     
     plt.plot(trading_results['date'], trading_results['equity'], 
-        color='blue', linewidth=1.5, label='Strategia ORB + RelVol')
+        color='blue', linewidth=1.5, label='Strategia ORB IVB')
     
     plt.plot(df['trading_day'],  buy_hold_df['equity'],
              color='green', linewidth=1.5, label='Buy & Hold')
     
     plt.axhline(y=STARTING_CAPITAL, color='r', linestyle='--', label='Capitale Iniziale')
     
-    plt.title('Confronto Strategia ORB + RelVol vs Buy & Hold', fontsize=14, pad=20)
+    plt.title('Confronto Strategia ORB IVB vs Buy & Hold', fontsize=14, pad=20)
     plt.xlabel('Data', fontsize=12)
     plt.ylabel('Capitale ($)', fontsize=12)
     plt.legend(fontsize=10)
@@ -77,11 +77,11 @@ if len(trading_results) > 0:
     plt.grid(True, linestyle='--', alpha=0.7)
     plt.tight_layout()
     
-    plt.savefig('outputs/equity__ORB__5Min.png', dpi=300, bbox_inches='tight')
+    plt.savefig('outputs/equity__ORB__IVB.png', dpi=300, bbox_inches='tight')
     plt.close()
     
     # Stampiamo le statistiche
-    print("\nStatistiche della Strategia ORB + RelVol:")
+    print("\nStatistiche della Strategia ORB:")
     print(f"Capitale Iniziale: ${STARTING_CAPITAL:,.2f}")
     print(f"Capitale Finale: ${trading_results['equity'].iloc[-1]:,.2f}")
     print(f"Profitto Totale: ${trading_results['cumulative_pnl'].iloc[-1]:,.2f}")
@@ -198,8 +198,8 @@ if len(trading_results) > 0:
     # Crea la tabella
     df_stats = pd.DataFrame(stats)
 
-    df_stats.to_csv('outputs/stats_strategy_5Min.csv', index=False)
+    df_stats.to_csv('outputs/stats_strategy_30Min_IVB.csv', index=False)
     
 else:
-    print("Nessun trade eseguito con la strategia ORB + RelVol")
+    print("Nessun trade eseguito con la strategia ORB + IVB")
     print("Verifica che ci siano segnali di trading validi nei dati")

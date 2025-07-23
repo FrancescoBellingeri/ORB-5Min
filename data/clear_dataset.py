@@ -5,7 +5,7 @@ import pytz
 from datetime import datetime
 
 # Importiamo il dataset
-df = pd.read_csv('data/qqq_30Min.csv')
+df = pd.read_csv('data/qqq_5Min.csv')
 
 # Convertiamo la colonna timestamp in datetime se non lo è già
 df['timestamp'] = pd.to_datetime(df['timestamp'], utc=True)
@@ -44,9 +44,10 @@ df['candle_direction'] = np.where(df['close'] > df['open'], 'bullish', 'bearish'
 
 # Aggiungiamo una colonna per identificare il giorno di trading
 df['trading_day'] = df['timestamp'].dt.date
+df['timestamp'] = pd.to_datetime(df['timestamp']).dt.tz_localize(None)
 
 valid_days = df.groupby(df['timestamp'].dt.date)['timestamp'].max().dt.time == pd.Timestamp('15:55').time()
 valid_days = valid_days[valid_days].index
 df = df[df['timestamp'].dt.date.isin(valid_days)]
 
-df.to_csv('data/qqq_30Min.csv', index=False)
+df.to_csv('data/qqq_5Min.csv', index=False)

@@ -9,15 +9,14 @@ import time as time_module
 IB_HOST = '127.0.0.1'
 IB_PORT = 7497  # Usa 4001 per IB Gateway, 7496 per TWS
 IB_CLIENT_ID = 1 # Un numero unico per questa connessione
-TICKER = 'MNQ'
-EXCHANGE = 'CME'
+TICKER = 'QQQ'
+EXCHANGE = 'NASDAQ'
 CURRENCY = 'USD'
 TIMEFRAME = 5
 ACCOUNT_SIZE = 50000 # Il tuo capitale iniziale
-MARKET_TIMEZONE = ZoneInfo("US/Central") # Orario sessione New York
-MARKET_OPEN = time(8, 30)
-DR_CALC_TIME = time(8, 45) # Orario dopo il quale calcoli il DR
-LAST_ENTRY_TIME = time(10, 0) # Ultimo orario per un'entrata
+MARKET_TIMEZONE = ZoneInfo("America/New_York") # Orario sessione New York
+MARKET_OPEN = time(9, 30)
+LAST_ENTRY_TIME = time(15, 50) # Ultimo orario per un'entrata
 
 # --- 2. Stato del Bot (Fondamentale!) ---
 # Usiamo un dizionario per tenere traccia di tutto
@@ -35,42 +34,103 @@ ib = IB()
 ib.connect(IB_HOST, IB_PORT, clientId=IB_CLIENT_ID)
 
 # Definisci il contratto per QQQ
-contract = ContFuture(TICKER, exchange=EXCHANGE, currency=CURRENCY)
+contract = Stock(TICKER, exchange=EXCHANGE, currency=CURRENCY)
 ib.qualifyContracts(contract)
 print("✅ Contratto qualificato:", contract)
 
-def get_dr_candles(ib, contract):
+def calculate_position_size(entry_price, stop_loss, account_size, risk_percent=1):
     """
-    Recupera le prime 3 candele dopo l'apertura del mercato per calcolare il DR
+    Calcola la size della posizione basata sul rischio
     """
+    risk_amount = account_size * (risk_percent / 100)
+    risk_per_share = abs(entry_price - stop_loss)
+    
+    if risk_per_share == 0:
+        return 0
+        
+    position_size = int(risk_amount / risk_per_share)
+    
+    # Limita la leva a 4x
+    max_position_value = account_size * 4
+    max_shares = int(max_position_value / entry_price)
+    
+    return min(position_size, max_shares)
+
+def calculate_ATR(ib, contract, period=14):
+    """Calcola l'ATR usando i dati storici di IB"""
     try:
-        # Richiediamo i dati della giornata
+        # Richiedi i dati degli ultimi 14 giorni
+        bars = ib.reqHistoricalData(
+            contract,
+            endDateTime='',
+            durationStr=f'{period} D',
+            barSizeSetting='1 day',
+            whatToShow='TRADES',
+            useRTH=True
+        )
+        
+        if not bars or len(bars) < period:
+            return None
+            
+        df = util.df(bars)
+        
+        # Calcolo TR
+        df['previous_close'] = df['close'].shift(1)
+        df['hl'] = df['high'] - df['low']
+        df['hpc'] = abs(df['high'] - df['previous_close'])
+        df['lpc'] = abs(df['low'] - df['previous_close'])
+        df['TR'] = df[['hl', 'hpc', 'lpc']].max(axis=1)
+        
+        # Calcolo ATR
+        atr = df['TR'].mean()
+        
+        return atr
+        
+    except Exception as e:
+        print(f"Errore nel calcolo ATR: {e}")
+        return None
+
+def get_first_candle_of_day(ib, contract):
+    """Recupera la prima candela del giorno dopo l'apertura"""
+    try:
+        # Ottieni la data corrente in ET
+        current_date = datetime.now(ZoneInfo("America/New_York")).date()
+        market_open_time = datetime.combine(current_date, MARKET_OPEN)
+        market_open_time = market_open_time.replace(tzinfo=ZoneInfo("America/New_York"))
+        
         bars = ib.reqHistoricalData(
             contract,
             endDateTime='',
             durationStr='1 D',
             barSizeSetting='5 mins',
             whatToShow='TRADES',
-            useRTH=True,  # Usa solo orario di mercato
+            useRTH=True,
             formatDate=1
         )
         
         if not bars:
             return None
             
-        # Converti in DataFrame per facilitare la manipolazione
         df = util.df(bars)
+        # I dati di IB sono già in ET, non serve localizzare
+        df['date'] = pd.to_datetime(df['date'])
         
-        # Trova le prime 3 candele dopo l'apertura del mercato (9:30 CT)
-        df['time'] = df['date'].apply(lambda x: x.time())
-        opening_candles = df[df['time'] >= MARKET_OPEN].head(3)
+        # Filtra solo le candele di oggi dopo l'apertura del mercato
+        today_bars = df[
+            (df['date'].dt.date == current_date) & 
+            (df['date'] >= market_open_time)
+        ]
         
-        if len(opening_candles) >= 3:
-            return bars[:3]  # Ritorna le prime 3 candele come BarDataList
-        return None
+        if len(today_bars) == 0:
+            print("Nessuna candela disponibile per oggi")
+            return None
+            
+        # Ritorna la prima candela di oggi come BarData object
+        first_today_index = today_bars.index[0]
+        return bars[first_today_index]
         
     except Exception as e:
-        print(f"Errore nel recupero delle candele per il DR: {e}")
+        print(f"Errore nel recupero della prima candela: {e}")
         return None
 
 def validate_prices(entry_price, tp_price, stop_loss):
@@ -80,7 +140,7 @@ def validate_prices(entry_price, tp_price, stop_loss):
     
     print(f"Validazione prezzi: Entry={entry_price}, TP={tp_price}, SL={stop_loss}")
     # Verifica che i prezzi siano multipli del tick size
-    tick_size = 0.25  # Per MNQ
+    tick_size = 0.01  # Per QQQ
     if any(round(price % tick_size, 8) != 0 for price in [entry_price, tp_price, stop_loss]):
         return False
     
@@ -105,18 +165,15 @@ def on_bar_update(bar, has_new_bar):
         bot_state["current_day"] = today
 
     # --- Logica del Daily Range (DR) ---
-    if not bot_state["dr_calculated_today"] and current_market_time >= DR_CALC_TIME:
-        dr_candles = get_dr_candles(ib, contract)
+    if not bot_state["dr_calculated_today"] and current_market_time >= MARKET_OPEN:
+        first_candle = get_first_candle_of_day(ib, contract)
         
-        if dr_candles and len(dr_candles) == 3:
-            dr_high = max(candle.high for candle in dr_candles)
-            dr_low = min(candle.low for candle in dr_candles)
-            
-            bot_state["daily_range"]["high"] = dr_high
-            bot_state["daily_range"]["low"] = dr_low
+        if first_candle:
+            bot_state["daily_range"]["high"] = first_candle.high
+            bot_state["daily_range"]["low"] = first_candle.low
             bot_state["dr_calculated_today"] = True
             
-            print(f"DR calcolato per oggi: High={dr_high}, Low={dr_low}")
+            print(f"DR calcolato per oggi: High={first_candle.high}, Low={first_candle.low}")
         else:
             print("Non ci sono abbastanza candele per calcolare il DR.")
             return
@@ -127,89 +184,122 @@ def on_bar_update(bar, has_new_bar):
         if current_market_time > LAST_ENTRY_TIME:
             return
             
-        signal_type = None
-        if bar.close > bot_state["daily_range"]["high"]:
-            signal_type = 'LONG'
-        elif bar.close < bot_state["daily_range"]["low"]:
-            signal_type = 'SHORT'
-        
-        if signal_type:
-            print(f"Segnale di ingresso {signal_type} rilevato!")
-            place_trade(signal_type, bar)
+        first_candle = get_first_candle_of_day(ib, contract)
+        if first_candle:
+            if first_candle.close > first_candle.open:  # Candela bullish
+                signal_type = 'LONG'
+            elif first_candle.close < first_candle.open:  # Candela bearish
+                signal_type = 'SHORT'
+            else:
+                return  # Candela doji, no trade
+                
+            place_trade(signal_type, first_candle)
+
+def round_to_tick(price, tick_size=0.01):  # QQQ tick size è $0.01
+    """
+    Arrotonda il prezzo al tick più vicino.
+    """
+    return round(price, 2)
 
 def place_trade(signal_type, entry_candle):
-    """
-    Funzione per calcolare i dettagli del trade e inviare l'ordine a IB.
-    """
-    dr = bot_state["daily_range"]
+    """Piazza il trade con la logica della nostra strategia"""
     
-    if signal_type == 'LONG':
-        entry_price = dr['high']
-        stop_loss = dr['low']
-    else: # SHORT
-        entry_price = dr['low']
-        stop_loss = dr['high']
-
-    def round_to_tick(price):
-        tick_size = 0.25
-        return round(price / tick_size) * tick_size
-    
-    stop_loss = round_to_tick(stop_loss)
-
-    # Qui va la tua logica di position sizing
-    # position_size = calculate_position_size(entry_price, stop_loss, ACCOUNT_SIZE)
-    # Per sicurezza, iniziamo con una size fissa e piccola!
-    position_size = 2 # **USARE SEMPRE UNA SIZE PICCOLA ALL'INIZIO!**
-    
-    if position_size == 0:
-        print("Position size è zero, nessun trade piazzato.")
-        return
-
-    # Usiamo un "Bracket Order": un ordine che include Entry, Take Profit e Stop Loss
-    # Questo è il modo più sicuro per fare trading algoritmico
-    R = abs(entry_price - stop_loss)
-    
-    if signal_type == 'LONG':
-        action_entry = 'BUY'
-        tp_price = entry_price + (1.5 * R) # TP1
-    else:
-        action_entry = 'SELL'
-        tp_price = entry_price - (1.5 * R) # TP1
-
-    if not validate_prices(entry_price, tp_price, stop_loss):
-        print("Prezzi non validi per l'ordine")
+    # Calcola ATR
+    atr_value = calculate_ATR(ib, contract)
+    if not atr_value:
+        print("❌ Impossibile calcolare ATR, trade annullato")
         return
         
-    # Definiamo il contratto
-    contract = ContFuture(TICKER, EXCHANGE, CURRENCY)
-    
-    # Creiamo gli ordini
-    # Useremo un ordine Stop per entrare quando il prezzo rompe il DR
-    entry_order = StopOrder(action_entry, position_size, entry_price)
-    entry_order.transmit = False # Non inviare ancora
+    # Calcola entry, stop loss e take profit
+    if signal_type == 'LONG':
+        entry_price = entry_candle.high
+        stop_loss = entry_price - (atr_value * 0.1)
+        risk = abs(entry_price - stop_loss)
+        take_profit = entry_price + (risk * 10)
+    else:  # SHORT
+        entry_price = entry_candle.low
+        stop_loss = entry_price + (atr_value * 0.1)
+        risk = abs(entry_price - stop_loss)
+        take_profit = entry_price - (risk * 10)
 
-    take_profit_order = LimitOrder('SELL' if signal_type == 'LONG' else 'BUY', position_size, tp_price)
-    take_profit_order.transmit = False
+    # Calcola position size
+    position_size = calculate_position_size(entry_price, stop_loss, ACCOUNT_SIZE)
+    
+    if position_size < 1:
+        print("Position size troppo piccola")
+        return
+        
+    # Arrotonda i prezzi al tick size
+    entry_price = round_to_tick(entry_price)
+    stop_loss = round_to_tick(stop_loss)
+    take_profit = round_to_tick(take_profit)
+    
+    # Validazione prezzi
+    if not validate_prices(entry_price, take_profit, stop_loss):
+        return
 
-    stop_loss_order = StopOrder('SELL' if signal_type == 'LONG' else 'BUY', position_size, stop_loss)
-    stop_loss_order.transmit = True # L'ultimo ordine del bracket trasmette tutto il gruppo
+    try:
+        # Crea l'ordine di entrata (Buy Stop o Sell Stop)
+        entry = StopOrder(
+            'BUY' if signal_type == 'LONG' else 'SELL',
+            position_size,
+            entry_price,
+            outsideRth=False,  # Solo durante le ore di mercato
+            tif='DAY'  # Ordine valido solo per oggi
+        )
+        entry.transmit = False  # Non trasmettere ancora
+        
+        # Crea l'ordine di Take Profit
+        tp = LimitOrder(
+            'SELL' if signal_type == 'LONG' else 'BUY',
+            position_size,
+            take_profit,
+            outsideRth=False,
+            tif='DAY'
+        )
+        tp.transmit = False
+        tp.parentId = entry.orderId
+        
+        # Crea l'ordine di Stop Loss
+        sl = StopOrder(
+            'SELL' if signal_type == 'LONG' else 'BUY',
+            position_size,
+            stop_loss,
+            outsideRth=False,
+            tif='DAY'
+        )
+        sl.transmit = True  # Ultimo ordine del bracket, ora trasmetti tutto
+        sl.parentId = entry.orderId
 
-    bracket_orders = [entry_order, take_profit_order, stop_loss_order]
-    
-    print(f"Invio Bracket Order: {action_entry} {position_size} @ {entry_price}, TP: {tp_price}, SL: {stop_loss}")
-    
-    # Invia gli ordini
-    for order in bracket_orders:
-        ib.placeOrder(contract, order)
-    
-    # Aggiorna lo stato del bot
-    bot_state["in_trade"] = True
-    bot_state["trade_details"] = {
-        "type": signal_type,
-        "entry_price": entry_price,
-        "sl": stop_loss,
-        "tp": tp_price
-    }
+        # Piazza gli ordini
+        entry_trade = ib.placeOrder(contract, entry)
+        tp_trade = ib.placeOrder(contract, tp)
+        sl_trade = ib.placeOrder(contract, sl)
+        
+        print(f"""
+                Trade piazzato:
+                Direction: {signal_type}
+                Size: {position_size}
+                Entry Stop: {entry_price}
+                Stop Loss: {stop_loss}
+                Take Profit: {take_profit}
+                Risk: ${risk * position_size:.2f}
+                        """)
+        
+        # Aggiorna lo stato del bot
+        bot_state["in_trade"] = True
+        bot_state["trade_details"] = {
+            "type": signal_type,
+            "entry_price": entry_price,
+            "stop_loss": stop_loss,
+            "take_profit": take_profit,
+            "position_size": position_size,
+            "trades": [entry_trade, tp_trade, sl_trade]
+        }
+        
+    except Exception as e:
+        print(f"❌ Errore nel piazzamento degli ordini: {e}")
+        return None
 
 def is_tradable_time():
     """Verifica se il mercato è aperto"""
@@ -217,8 +307,8 @@ def is_tradable_time():
     current_time = current_time.time()
     
     # Verifica l'orario di mercato (9:30 - 15:15 CT)
-    return MARKET_OPEN <= current_time <= LAST_ENTRY_TIME
-    #return True
+    #return MARKET_OPEN <= current_time <= LAST_ENTRY_TIME
+    return True
 
 def get_last_candle(ib, contract):
     """
