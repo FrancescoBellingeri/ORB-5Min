@@ -19,6 +19,7 @@ df['trading_day'] = pd.to_datetime(df['trading_day'])
 trading_results_5Min = pd.read_csv('outputs/trading_results_5Min.csv')
 trading_results_15Min = pd.read_csv('outputs/trading_results_15Min.csv')
 trading_results_30Min = pd.read_csv('outputs/trading_results_30Min.csv')
+trading_results_30Min_VWAP = pd.read_csv('outputs/trading_results_30Min_VWAP.csv')
 trading_results_60Min = pd.read_csv('outputs/trading_results_60Min.csv')
 
 STARTING_CAPITAL = 50000
@@ -52,6 +53,10 @@ date, equity = getPlot(trading_results_30Min)
 
 plt.plot(date, equity, 
     color='orange', linewidth=1.5, label='Strategia ORB 30 Minuti')
+
+date, equity = getPlot(trading_results_30Min_VWAP)
+plt.plot(date, equity, 
+    color='purple', linewidth=1.5, label='Strategia ORB 30 Minuti + VWAP')
 
 date, equity = getPlot(trading_results_60Min)
 

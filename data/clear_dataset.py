@@ -5,15 +5,11 @@ import pytz
 from datetime import datetime
 
 # Importiamo il dataset
-df = pd.read_csv('data/qqq_5Min.csv')
+df = pd.read_csv('MNQ_30Min.csv')
 
 # Convertiamo la colonna timestamp in datetime se non lo è già
 df['timestamp'] = pd.to_datetime(df['timestamp'], utc=True)
-# Group by date and check if last candle is at 15:55
-# Convertiamo in fuso orario New York
-ny_tz = pytz.timezone('America/New_York')
-df['timestamp'] = df['timestamp'].dt.tz_convert(ny_tz)
-
+# Group by date and check if last candle is at 15:5
 
 # Rimuoviamo i giorni festivi
 cal = USFederalHolidayCalendar()
@@ -25,16 +21,6 @@ df = df[df['timestamp'].dt.dayofweek < 5]
 
 # Creiamo colonne per ora e minuti per facilitare il filtraggio
 df['time'] = df['timestamp'].dt.time
-
-# Creiamo i tempi limite del mercato
-market_open = pd.Timestamp('09:30').time()
-market_close = pd.Timestamp('15:55').time()
-
-# Filtriamo solo le ore di mercato
-df = df[
-    (df['time'] >= market_open) & 
-    (df['time'] <= market_close)
-]
 
 # Ordiniamo per timestamp
 df = df.sort_values('timestamp')
@@ -50,4 +36,4 @@ valid_days = df.groupby(df['timestamp'].dt.date)['timestamp'].max().dt.time == p
 valid_days = valid_days[valid_days].index
 df = df[df['timestamp'].dt.date.isin(valid_days)]
 
-df.to_csv('data/qqq_5Min.csv', index=False)
+df.to_csv('data/MNQ_cleared.csv', index=False)
