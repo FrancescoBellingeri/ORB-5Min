@@ -1,16 +1,20 @@
 import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
-import seaborn as sns
+from datetime import time
 
 # Carichiamo il dataset pulito
-df = pd.read_csv('./data/qqq_5Min.csv')
+df = pd.read_csv('./data/qqq_1Min_cleared.csv')
+
+df['timestamp'] = pd.to_datetime(df['timestamp'], utc=True)
+
 
 # Convertiamo la colonna trading_day in datetime
 df['trading_day'] = pd.to_datetime(df['trading_day'])
 
+df['timestamp'] = df['timestamp'].dt.tz_convert('America/New_York')
+df['time'] = df['timestamp'].dt.time
+
 # Filtriamo solo i dati del 2024
-df = df[df['trading_day'].dt.year > 2024]
+#df = df[df['trading_day'].dt.year > 2024]
 
 def calculate_position_size(entry_price, stop_loss, account_size, leverage=4):
     # Calcolo del rischio in dollari
@@ -44,19 +48,28 @@ def ibkr_commission(shares):
     # Output
     return total_fees
 
-def calculate_dr_for_day(candle):
+def calculate_dr_for_day(day_data):
     """
-    Calcola il Daily Range per le prime 3 candele della giornata.
+    Calcola il Daily Range per le candele tra le 9:30 e le 10:00.
     Returns: {'high': float, 'low': float, 'size': float}
     """
-
-    if candle.empty:
+    
+    # Filtra le candele tra le 9:30 e le 10:00
+    start_time = day_data.iloc[0]['timestamp'].replace(hour=9, minute=30)
+    end_time = day_data.iloc[0]['timestamp'].replace(hour=10, minute=0)
+    
+    dr_candles = day_data[
+        (day_data['timestamp'] >= start_time) & 
+        (day_data['timestamp'] <= end_time)
+    ]
+    
+    if dr_candles.empty:
         return None
         
     return {
-        'high': candle['high'],
-        'low': candle['low'],
-        'size': candle['high'] - candle['low']
+        'high': dr_candles['high'].max(),
+        'low': dr_candles['low'].min(),
+        'size': dr_candles['high'].max() - dr_candles['low'].min()
     }
 
 def calculate_ATR(df, period=14):
@@ -93,18 +106,19 @@ def calculate_ATR(df, period=14):
     
     return atr
 
-def execute_trade(day_data, signal_type, first_candle, entry_price, stop_loss, position_size):
+def execute_trade(day_data, bias, last_dr_candle, entry_price, stop_loss, position_size):
     # Trova le candele dopo il segnale
-    candles_after_signal = day_data[day_data['timestamp'] > first_candle['timestamp']]
-    
-    # Calcola il rischio (sempre positivo)
-    risk = abs(entry_price - stop_loss)
-    take_profit = entry_price + (risk * 6) if signal_type == 'LONG' else entry_price - (risk * 6)
+    candles_after_signal = day_data[day_data['timestamp'] > last_dr_candle['timestamp']]
     
     if len(candles_after_signal) == 0:
         return None
+    
+    # Calcola il rischio (sempre positivo)
+    risk = abs(entry_price - stop_loss)
+    take_profit = entry_price + (risk * 6) if bias == 'LONG' else entry_price - (risk * 6)
 
     entry_candle = None
+    exit_candle = None
     exit_price = None
     exit_reason = 'EOD'
     current_stop = stop_loss
@@ -112,13 +126,13 @@ def execute_trade(day_data, signal_type, first_candle, entry_price, stop_loss, p
     
     for _, candle in candles_after_signal.iterrows():
         if entry_candle is None:
-            if signal_type == 'LONG' and candle['high'] >= entry_price:
+            if bias == 'LONG' and candle['high'] >= entry_price:
                 entry_candle = candle
-            elif signal_type == 'SHORT' and candle['low'] <= entry_price:
+            elif bias == 'SHORT' and candle['low'] <= entry_price:
                 entry_candle = candle
             continue
         
-        if signal_type == 'LONG':
+        if bias == 'LONG':
             # Se il prezzo corrente è sopra entry price e il VWAP è sopra lo stop loss originale
             if candle['close'] > entry_price  and candle['vwap'] > stop_loss:
                 old_stop = current_stop
@@ -130,10 +144,12 @@ def execute_trade(day_data, signal_type, first_candle, entry_price, stop_loss, p
             if candle['low'] <= current_stop:
                 exit_price = current_stop
                 exit_reason = 'TRAILING' if stop_moved_to_profit else 'SL'
+                exit_candle = candle
                 break
             elif candle['high'] >= take_profit:
                 exit_price = take_profit
                 exit_reason = 'TP'
+                exit_candle = candle
                 break
                 
         else:  # SHORT
@@ -147,10 +163,12 @@ def execute_trade(day_data, signal_type, first_candle, entry_price, stop_loss, p
             if candle['high'] >= current_stop:
                 exit_price = current_stop
                 exit_reason = 'TRAILING' if stop_moved_to_profit else 'SL'
+                exit_candle = candle
                 break
             elif candle['low'] <= take_profit:
                 exit_price = take_profit
                 exit_reason = 'TP'
+                exit_candle = candle
                 break
     
     # Se non siamo mai entrati, nessun trade
@@ -160,6 +178,7 @@ def execute_trade(day_data, signal_type, first_candle, entry_price, stop_loss, p
     # Se non abbiamo hittato stop loss, usiamo chiusura fine giornata
     if exit_reason == 'EOD':
         exit_price = candles_after_signal.iloc[-1]['close']
+        exit_candle = candles_after_signal.iloc[-1]
 
     reward = abs(exit_price - entry_price)
     rr_ratio = reward / risk if risk > 0 else 0
@@ -167,7 +186,7 @@ def execute_trade(day_data, signal_type, first_candle, entry_price, stop_loss, p
     total_commission = ibkr_commission(position_size)
 
     # Calcolo PnL
-    if signal_type == 'LONG':
+    if bias == 'LONG':
         pnl = (exit_price - entry_price) * position_size - total_commission
     else:  # SHORT
         pnl = (entry_price - exit_price) * position_size - total_commission
@@ -176,13 +195,15 @@ def execute_trade(day_data, signal_type, first_candle, entry_price, stop_loss, p
         'entry_price': entry_price,
         'exit_price': exit_price,
         'stop_loss': stop_loss,
-        'direction': signal_type,
+        'direction': bias,
         'exit_reason': exit_reason,
         'position_size': position_size,
         'pnl': pnl,
         'R:R': rr_ratio,
         'commission': total_commission,
         'entry_time': entry_candle['timestamp'] if entry_candle is not None else None,
+        'exit_time': exit_candle['timestamp'] if exit_candle is not None else None,
+        'vwap': entry_candle['vwap']
     }
 
 def analyze_trading_day(day_data, current_equity):
@@ -202,33 +223,25 @@ def analyze_trading_day(day_data, current_equity):
     
     # Calcola l'ATR
     atr_value = calculate_ATR(previous_data)
-
-    first_candle = day_data.iloc[0]
-    # No trade se candela Doji
-    if first_candle['open'] == first_candle['close']:
-        return None
     
-    # Determina la direzione della candela
-    candle_direction = 'bullish' if first_candle['close'] > first_candle['open'] else 'bearish'
-    
-    # Calcola il DR (9:30-9:35) ET
-    dr = calculate_dr_for_day(first_candle)
+    # Calcola il DR (9:30-10:00) ET
+    dr = calculate_dr_for_day(day_data)
     if not dr:
         return None
-    
-    # Trova le candele dopo il DR
-    candles_after_dr = day_data.iloc[2:]
-    
-    if len(candles_after_dr) == 0:
-        return None
-    
+
+    first_dr_candle = day_data[day_data['time'] == time(9, 30)].iloc[0]
+    last_dr_candle = day_data[day_data['time'] == time(10, 0)].iloc[0]
+
+    if first_dr_candle['open'] < last_dr_candle['close']:
+        bias = 'LONG'
+    else:
+        bias = 'SHORT'
+
     # Determina il tipo di trade basato sulla direzione della candela
-    if candle_direction == 'bullish':
-        signal_type = 'LONG'
+    if bias == 'LONG':
         entry_price = dr['high']
         stop_loss = entry_price - (atr_value * 0.1)
-    else:  # bearish
-        signal_type = 'SHORT'
+    else:  # short
         entry_price = dr['low']
         stop_loss = entry_price + (atr_value * 0.1)
     
@@ -238,7 +251,7 @@ def analyze_trading_day(day_data, current_equity):
         return None
     
     # Esegui il trade
-    trade_result = execute_trade(day_data, signal_type, first_candle, entry_price, stop_loss, position_size)
+    trade_result = execute_trade(day_data, bias, last_dr_candle, entry_price, stop_loss, position_size)
     if trade_result is not None:
         trade_result['date'] = day_data.iloc[0]['timestamp']
         trade_result['ATR'] = atr_value
@@ -262,5 +275,5 @@ for day, day_data in df.groupby('trading_day'):
 # Creiamo un DataFrame con i risultati
 trading_results = pd.DataFrame(results)
 
-trading_results.to_csv('outputs/trading_results_30Min_VWAP.csv', index=False)
+trading_results.to_csv('outputs/trading_results_1Min_VWAP.csv', index=False)
 print(f"\nRisultati salvati in 'trading_results_TP.csv'")

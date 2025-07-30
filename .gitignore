@@ -8,4 +8,4 @@ roadmap.txt
 outputs/*.csv
 
 # Ignora tutti i CSV dentro la cartella data
-data/*.csv
+#data/*.csv

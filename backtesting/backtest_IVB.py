@@ -15,27 +15,12 @@ df['timestamp'] = pd.to_datetime(df['timestamp']).dt.tz_localize(None)
 
 def calculate_position_size(entry_price, stop_loss, account_size, leverage=4):
     # Calcolo del rischio in dollari
-    R = abs(entry_price - stop_loss)
+    distance_points = abs(entry_price - stop_loss)
     
     # Calcolo size basato sul rischio (1% del capitale)
-    risk_based_size = int(account_size * 0.01 / R)
+    max_risk = int(account_size * 0.01 / distance_points)
     
-    # Calcolo size massimo con leva piena
-    max_shares_with_leverage = int((account_size * leverage) / entry_price)
-    
-    # Usa il risk_based_size direttamente
-    position_size = risk_based_size
-    
-    # Debug info
-    position_value = position_size * entry_price
-    actual_leverage = position_value / account_size
-    
-    # Se superiamo la leva massima, allora limitiamo
-    if actual_leverage > leverage:
-        position_size = max_shares_with_leverage
-    
-    #return position_size if position_size > 0 else 0
-    return risk_based_size
+    return max_risk / distance_points
 
 def ibkr_commission(shares):
 
